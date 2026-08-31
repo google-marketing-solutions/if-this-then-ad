@@ -265,26 +265,57 @@ var AUTH_MODE;
     AUTH_MODE["SERVICE_ACCOUNT"] = "SERVICE_ACCOUNT";
 })(AUTH_MODE || (AUTH_MODE = {}));
 class Auth {
-    constructor(account) {
-        this.authMode = account ? AUTH_MODE.SERVICE_ACCOUNT : AUTH_MODE.USER;
-        this.serviceAccount = account;
+    constructor(account, scope = 'https://www.googleapis.com/auth/display-video') {
+        this.defaultScope = scope;
+        let resolvedAccount = account;
+        if (!resolvedAccount && typeof PropertiesService !== 'undefined') {
+            const scriptProps = PropertiesService.getScriptProperties();
+            const saProp = scriptProps.getProperty('serviceAccount') ||
+                scriptProps.getProperty('SERVICE_ACCOUNT') ||
+                scriptProps.getProperty('service_account') ||
+                scriptProps.getProperty('SERVICE_ACCOUNT_KEY');
+            if (saProp) {
+                resolvedAccount = saProp;
+            }
+        }
+        if (resolvedAccount) {
+            this.authMode = AUTH_MODE.SERVICE_ACCOUNT;
+            if (typeof resolvedAccount === 'string') {
+                try {
+                    this.serviceAccount = JSON.parse(resolvedAccount);
+                }
+                catch (e) {
+                    throw new Error(`Failed to parse service account JSON: ${e.message}`);
+                }
+            }
+            else {
+                this.serviceAccount = resolvedAccount;
+            }
+        }
+        else {
+            this.authMode = AUTH_MODE.USER;
+        }
     }
-    getAuthToken() {
+    getAuthToken(scope) {
         if (this.authMode === AUTH_MODE.USER) {
             return ScriptApp.getOAuthToken();
         }
         else if (!this.serviceAccount ||
-            !('private_key' in this.serviceAccount)) {
+            !this.serviceAccount.private_key) {
             throw new Error('No or invalid service account provided');
         }
+        const tokenScope = scope ?? this.defaultScope;
+        const privateKey = (this.serviceAccount.private_key || '').replace(/\\n/g, '\n');
         const service = OAuth2.createService('Service Account')
             .setTokenUrl('https://accounts.google.com/o/oauth2/token')
-            .setPrivateKey(this.serviceAccount.private_key)
+            .setPrivateKey(privateKey)
             .setIssuer(this.serviceAccount.client_email)
-            .setSubject(this.serviceAccount.user_email)
             .setPropertyStore(PropertiesService.getScriptProperties())
             .setParam('access_type', 'offline')
-            .setScope('https://www.googleapis.com/auth/display-video');
+            .setScope(tokenScope);
+        if (this.serviceAccount.user_email) {
+            service.setSubject(this.serviceAccount.user_email);
+        }
         service.reset();
         return service.getAccessToken();
     }
@@ -457,7 +488,7 @@ class GoogleAds extends TargetAgent {
     }
     process(identifier, type, action, evaluation, params) {
         this.ensureRequiredParameters(params);
-        const auth = new Auth(params.serviceAccount ?? undefined);
+        const auth = new Auth(params.serviceAccount ?? undefined, 'https://www.googleapis.com/auth/adwords');
         this.authToken = auth.getAuthToken();
         this.parameters = params;
         if (action === GOOGLE_ADS_ACTION.TOGGLE) {
@@ -495,7 +526,7 @@ class GoogleAds extends TargetAgent {
         }
     }
     validate(identifier, type, action, evaluation, params) {
-        const auth = new Auth(params.serviceAccount ?? undefined);
+        const auth = new Auth(params.serviceAccount ?? undefined, 'https://www.googleapis.com/auth/adwords');
         this.authToken = auth.getAuthToken();
         this.parameters = params;
         const expectedStatus = evaluation

@@ -244,7 +244,7 @@ Given the above JSON source we could add the following to our Sheet:
 
 **Optional parameters**
 
-- `target:serviceAccount`
+- `target:serviceAccount` (alternative authentication; for better security, place the service account JSON in Apps Script **Project Settings > Script Properties** under `serviceAccount` rather than spreadsheet columns)
 
 ### Google Ads
 
@@ -256,7 +256,7 @@ Given the above JSON source we could add the following to our Sheet:
 **Optional parameters**
 
 - `target:loginCustomerId` (when accessing via MCC; should be the MCC's CID)
-- `target:serviceAccount` (alternative way of authentication)
+- `target:serviceAccount` (alternative authentication; for better security, place the service account JSON in Apps Script **Project Settings > Script Properties** under `serviceAccount` rather than spreadsheet columns)
 
 **Important**
 

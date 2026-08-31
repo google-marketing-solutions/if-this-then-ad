@@ -15,17 +15,17 @@
  */
 
 export interface ServiceAccount {
-  type: 'this.serviceAccount';
-  project_id: string;
-  private_key_id: string;
+  type?: string;
+  project_id?: string;
+  private_key_id?: string;
   private_key: string;
   client_email: string;
-  client_id: string;
-  auth_uri: 'https://accounts.google.com/o/oauth2/auth';
-  token_uri: 'https://oauth2.googleapis.com/token';
-  auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs';
-  client_x509_cert_url: string;
-  user_email: string;
+  client_id?: string;
+  auth_uri?: string;
+  token_uri?: string;
+  auth_provider_x509_cert_url?: string;
+  client_x509_cert_url?: string;
+  user_email?: string;
 }
 
 export enum AUTH_MODE {
@@ -34,71 +34,97 @@ export enum AUTH_MODE {
 }
 
 /**
- * This is a wrapper class for handling authentification to DV360 API.
- * This class can be used to auth also to other Google APIs.
+ * Wrapper class for handling authentication to DV360, Google Ads, and other Google APIs.
  */
 export class Auth {
-  serviceAccount: ServiceAccount;
+  serviceAccount?: ServiceAccount;
   authMode: AUTH_MODE;
+  defaultScope: string;
 
   /**
    * Set the OAuth configuration.
-   * In order to authorise your DV360 API calls you can:
-   * 1. Use the same Google account as you open the spreadsheet.
-   *    For this approach, you don't need to do pass a service account.
-   * 2. Use a service account.
-   *    This is a service account in JSON format from your GCP project.
-   *    How to get a service account credentials from GCP:
-   *    https://cloud.google.com/iam/docs/service-accounts
+   * Supported modes:
+   * 1. Default User OAuth: Uses the session of the user who runs or sets up the trigger.
+   * 2. Script Property Service Account: Place the GCP Service Account JSON in Apps Script
+   *    Project Settings > Script Properties under 'serviceAccount'.
+   * 3. Row-level Service Account: Passed explicitly via params.serviceAccount.
    *
-   * Service account credentials should be specified in the following JSON format:
-   * {
-   * "type": "this.serviceAccount",
-   * "project_id": "...",
-   * "private_key_id": "...",
-   * "private_key": "...",
-   * "client_email": "...@...gserviceaccount.com",
-   * "client_id": "...",
-   * "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-   * "token_uri": "https://oauth2.googleapis.com/token",
-   * "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-   * "client_x509_cert_url": "..."
-   * }
-   *
-   * @param {?Object} account The service account or empty
+   * @param {Object|string} [account] Service account object or JSON string (optional)
+   * @param {string} [scope] OAuth scope (defaults to DV360)
    */
-  constructor(account?: Object) {
-    this.authMode = account ? AUTH_MODE.SERVICE_ACCOUNT : AUTH_MODE.USER;
-    this.serviceAccount = account as ServiceAccount;
+  constructor(
+    account?: Object | string,
+    scope = 'https://www.googleapis.com/auth/display-video'
+  ) {
+    this.defaultScope = scope;
+    let resolvedAccount = account;
+
+    // Check Apps Script Script Properties if not passed directly
+    if (!resolvedAccount && typeof PropertiesService !== 'undefined') {
+      const scriptProps = PropertiesService.getScriptProperties();
+      const saProp =
+        scriptProps.getProperty('serviceAccount') ||
+        scriptProps.getProperty('SERVICE_ACCOUNT') ||
+        scriptProps.getProperty('service_account') ||
+        scriptProps.getProperty('SERVICE_ACCOUNT_KEY');
+      if (saProp) {
+        resolvedAccount = saProp;
+      }
+    }
+
+    if (resolvedAccount) {
+      this.authMode = AUTH_MODE.SERVICE_ACCOUNT;
+      if (typeof resolvedAccount === 'string') {
+        try {
+          this.serviceAccount = JSON.parse(resolvedAccount) as ServiceAccount;
+        } catch (e) {
+          throw new Error(
+            `Failed to parse service account JSON: ${(e as Error).message}`
+          );
+        }
+      } else {
+        this.serviceAccount = resolvedAccount as ServiceAccount;
+      }
+    } else {
+      this.authMode = AUTH_MODE.USER;
+    }
   }
 
   /**
-   * Get Auth Token for OAuth authorization for your service account.
-   * You need this token in order to authorize API requests.
-   * See more: https://github.com/gsuitedevs/apps-script-oauth2/blob/master/README.md
-   * See more: https://developers.google.com/apps-script/reference/script/script-app#getOAuthToken()
+   * Get Auth Token for OAuth authorization.
    *
+   * @param {string} [scope] Optional scope override
    * @returns {string} OAuth Token
    * @throws {Error}
    */
-  getAuthToken() {
+  getAuthToken(scope?: string) {
     if (this.authMode === AUTH_MODE.USER) {
       return ScriptApp.getOAuthToken();
     } else if (
       !this.serviceAccount ||
-      !('private_key' in this.serviceAccount)
+      !this.serviceAccount.private_key
     ) {
       throw new Error('No or invalid service account provided');
     }
 
+    const tokenScope = scope ?? this.defaultScope;
+    // Normalize newlines in private key to avoid 'Invalid argument: key' error in Apps Script crypto
+    const privateKey = (this.serviceAccount.private_key || '').replace(
+      /\\n/g,
+      '\n'
+    );
+
     const service = OAuth2.createService('Service Account')
       .setTokenUrl('https://accounts.google.com/o/oauth2/token')
-      .setPrivateKey(this.serviceAccount.private_key)
+      .setPrivateKey(privateKey)
       .setIssuer(this.serviceAccount.client_email)
-      .setSubject(this.serviceAccount.user_email)
       .setPropertyStore(PropertiesService.getScriptProperties())
       .setParam('access_type', 'offline')
-      .setScope('https://www.googleapis.com/auth/display-video');
+      .setScope(tokenScope);
+
+    if (this.serviceAccount.user_email) {
+      service.setSubject(this.serviceAccount.user_email);
+    }
 
     service.reset();
     return service.getAccessToken();

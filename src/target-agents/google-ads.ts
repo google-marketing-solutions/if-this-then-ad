@@ -82,7 +82,10 @@ export class GoogleAds extends TargetAgent {
     // Check for missing parameters
     this.ensureRequiredParameters(params);
 
-    const auth = new Auth(params.serviceAccount ?? undefined);
+    const auth = new Auth(
+      params.serviceAccount ?? undefined,
+      'https://www.googleapis.com/auth/adwords'
+    );
     this.authToken = auth.getAuthToken();
 
     this.parameters = params;
@@ -168,7 +171,10 @@ export class GoogleAds extends TargetAgent {
     evaluation: boolean,
     params: Parameters
   ) {
-    const auth = new Auth(params.serviceAccount ?? undefined);
+    const auth = new Auth(
+      params.serviceAccount ?? undefined,
+      'https://www.googleapis.com/auth/adwords'
+    );
     this.authToken = auth.getAuthToken();
 
     this.parameters = params;
